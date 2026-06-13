@@ -1,7 +1,7 @@
-﻿public static class Logger
+﻿public static class Logger //deklarisana kao static da bi mogli da je pozovemo iz bilo kog mesta u kodu sa logger.log("poruka")
 {
-    private static readonly object locker = new();
-    private static readonly string logFajl = "server.log";
+    private static readonly object locker = new(); //objekat kao kljuc
+    private static readonly string logFajl = "server.log"; //Definiše ime fajla u koji se upisuju logovi
 
     public static void Log(string poruka)
     {

@@ -1,23 +1,15 @@
-﻿public class ZipCache
+public class ZipCache
 {
-    private class CacheEntry //kontejner za stvari koje su vec u kesu
+    private class CacheEntry
     {
         public byte[] Podaci { get; set; } = Array.Empty<byte>();
         public long Velicina => Podaci.Length;
         public DateTime PoslednjiPristup { get; set; } = DateTime.UtcNow;
     }
 
-    private class ObradaUToku //kljuc za cache stampede, ovde belezimo stanje gde glavna nit pravi fajl a fajl jos nije u kesu
-    {
-        public bool Zavrseno { get; set; }
-        public byte[]? Podaci { get; set; }
-        public Exception? Greska { get; set; }
-    }
-
     private readonly object locker = new();
-
     private readonly Dictionary<string, CacheEntry> cache = new();
-    private readonly Dictionary<string, ObradaUToku> obradeUToku = new();
+    private readonly Dictionary<string, TaskCompletionSource<byte[]>> obradeUToku = new();
 
     private readonly long maksimalnaVelicina;
     private long trenutnaVelicina;
@@ -26,10 +18,11 @@
     {
         this.maksimalnaVelicina = maksimalnaVelicina;
     }
-
-    public byte[] VratiIliKreiraj(string kljuc, Func<byte[]> kreiraj)
+    public async Task<byte[]> VratiIliKreirajAsync(string kljuc, Func<Task<byte[]>> kreiraj)
     {
-        ObradaUToku? obrada;
+        TaskCompletionSource<byte[]>? tcs = null;
+        bool miKreiramo = false;
+
         lock (locker)
         {
             if (cache.TryGetValue(kljuc, out CacheEntry? entry))
@@ -39,60 +32,54 @@
                 return entry.Podaci;
             }
 
-            if (obradeUToku.TryGetValue(kljuc, out obrada))
+            if (obradeUToku.TryGetValue(kljuc, out TaskCompletionSource<byte[]>? postojeciTcs))
             {
                 Logger.Log("CACHE WAIT: " + kljuc);
-
-                while (!obrada.Zavrseno)
-                {
-                    Monitor.Wait(locker);
-                }
-
-                if (obrada.Greska != null)
-                {
-                    throw obrada.Greska;
-                }
-
-                return obrada.Podaci!;
+                tcs = postojeciTcs;
             }
+            else
+            {
+                tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+                obradeUToku[kljuc] = tcs;
+                miKreiramo = true;
+            }
+        }
 
-            obrada = new ObradaUToku(); //PRAVIMO NOVI OBRADA U TOKU OBJEKAT I STAVLJAMO GA U RECNIK
-            obradeUToku[kljuc] = obrada;
+        if (!miKreiramo)
+        {
+            return await tcs!.Task;
         }
 
         byte[] rezultat;
-        Exception? greska = null;
         try
         {
             Logger.Log("CACHE MISS: " + kljuc);
-            rezultat = kreiraj();
+            rezultat = await kreiraj();
+
+            lock (locker)
+            {
+                obradeUToku.Remove(kljuc);
+                if (rezultat.Length <= maksimalnaVelicina)
+                {
+                    DodajUCache(kljuc, rezultat);
+                }
+            }
+
+            tcs.SetResult(rezultat);
         }
         catch (Exception ex)
         {
-            rezultat = Array.Empty<byte>();
-            greska = ex;
-        }
-
-        lock (locker) {
-            obrada.Podaci = rezultat;
-            obrada.Greska = greska;
-            obrada.Zavrseno = true;
-
-            obradeUToku.Remove(kljuc);
-
-            if (greska == null && rezultat.Length <= maksimalnaVelicina)
+            lock (locker)
             {
-                DodajUCache(kljuc, rezultat);
+                obradeUToku.Remove(kljuc);
             }
+            tcs.SetException(ex);
+            throw;
+        }
 
-            Monitor.PulseAll(locker);
-        }
-        if (greska != null)
-        {
-            throw greska;
-        }
         return rezultat;
     }
+
     private void DodajUCache(string kljuc, byte[] podaci)
     {
         while (trenutnaVelicina + podaci.Length > maksimalnaVelicina && cache.Count > 0)
@@ -104,8 +91,7 @@
 
             trenutnaVelicina -= cache[najstarijiKljuc].Velicina;
             cache.Remove(najstarijiKljuc);
-
-            Logger.Log("CACHE EVICT: " + najstarijiKljuc);
+            Logger.Log("CACHE EVICT (LRU): " + najstarijiKljuc);
         }
 
         cache[kljuc] = new CacheEntry
@@ -113,10 +99,8 @@
             Podaci = podaci,
             PoslednjiPristup = DateTime.UtcNow
         };
-
         trenutnaVelicina += podaci.Length;
-
-        Logger.Log($"CACHE ADD: {kljuc}, trenutna velicina cache-a: {trenutnaVelicina} bajtova");
+        Logger.Log($"CACHE ADD: {kljuc} | Velicina kesa: {trenutnaVelicina} / {maksimalnaVelicina} bajtova");
     }
 
     public static string KreirajKljuc(List<FileInfo> fajlovi)
