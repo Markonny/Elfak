@@ -1,13 +1,13 @@
 ﻿public class ZipCache
 {
-    private class CacheEntry //kontejner za stvari koje su vec u kesu
+    private class CacheEntry
     {
         public byte[] Podaci { get; set; } = Array.Empty<byte>();
         public long Velicina => Podaci.Length;
         public DateTime PoslednjiPristup { get; set; } = DateTime.UtcNow;
     }
 
-    private class ObradaUToku //kljuc za cache stampede, ovde belezimo stanje gde glavna nit pravi fajl a fajl jos nije u kesu
+    private class ObradaUToku
     {
         public bool Zavrseno { get; set; }
         public byte[]? Podaci { get; set; }
@@ -56,7 +56,7 @@
                 return obrada.Podaci!;
             }
 
-            obrada = new ObradaUToku(); //PRAVIMO NOVI OBRADA U TOKU OBJEKAT I STAVLJAMO GA U RECNIK
+            obrada = new ObradaUToku();
             obradeUToku[kljuc] = obrada;
         }
 
