@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>NewsTopicServer</RootNamespace>
+    <AssemblyName>NewsTopicServer</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Rx.NET -->
+    <PackageReference Include="System.Reactive" Version="6.0.1" />
+
+    <!-- Akka.NET -->
+    <PackageReference Include="Akka" Version="1.5.20" />
+
+    <!-- Topic modeling (Maximum Entropy) -->
+    <PackageReference Include="SharpEntropy" Version="1.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- HOCON konfiguracija za Akka dispatchere se kopira uz izlazni exe -->
+    <None Update="akka.conf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

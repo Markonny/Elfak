@@ -1,38 +1,28 @@
 ﻿using System;
 using System.Net;
+using System.Threading;
 
 string folderSaFajlovima = Path.Combine(Directory.GetCurrentDirectory(), "ServerFajlovi");
 Directory.CreateDirectory(folderSaFajlovima);
-BlockingZahtevRed<HttpListenerContext> redZahteva = new();
+
 ZipCache cache = new(50 * 1024 * 1024); // 50 mb
 
-int brojRadnihNiti = 4;
-
-for (int i = 0; i < brojRadnihNiti; i++)
-{
-    Thread nit = new Thread(RadnaNit);
-    nit.Start();
-}
 HttpListener listener = new();
 listener.Prefixes.Add("http://localhost:5050/");
 listener.Start();
 
 Console.WriteLine("Server pokrenut na http://localhost:5050/");
 Logger.Log("Server pokrenut.");
-while (true){
- 
+
+while (true)
+{
     HttpListenerContext context = listener.GetContext();
     Logger.Log("Primljen zahtev: " + context.Request.RawUrl);
-    redZahteva.Dodaj(context);
-}
-void RadnaNit() {
-    while (true)
+
+    ThreadPool.QueueUserWorkItem(state =>
     {
-        {
-            HttpListenerContext context = redZahteva.Uzmi();
-            ObradiZahtev(context);
-        }
-    }
+        ObradiZahtev(context);
+    });
 }
 void ObradiZahtev(HttpListenerContext context)
 {
@@ -57,12 +47,15 @@ void ObradiZahtev(HttpListenerContext context)
             PosaljiTekst(context, "Nijedan od trazenih fajlova ne postoji na serveru.");
             return;
         }
+
         string kljuc = ZipCache.KreirajKljuc(postojeciFajlovi);
+
         byte[] zipPodaci = cache.VratiIliKreiraj(kljuc, () =>
         {
             Logger.Log("Kreiranje ZIP arhive za: " + string.Join(", ", postojeciFajlovi.Select(f => f.Name)));
             return ZipServis.KreirajZip(postojeciFajlovi);
         });
+
         PosaljiZip(context, zipPodaci, "archive.zip");
 
         Logger.Log("Zahtev uspesan.");
@@ -81,6 +74,7 @@ void ObradiZahtev(HttpListenerContext context)
         }
     }
 }
+
 List<string> ParsirajFajlove(string rawUrl)
 {
     string putanja = rawUrl.TrimStart('/');
@@ -96,6 +90,7 @@ List<string> ParsirajFajlove(string rawUrl)
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .ToList();
 }
+
 List<FileInfo> NadjiPostojeceFajlove(List<string> trazeniFajlovi)
 {
     List<FileInfo> rezultat = new();
@@ -122,18 +117,16 @@ void PosaljiZip(HttpListenerContext context, byte[] zipPodaci, string imeFajla)
     context.Response.ContentType = "application/zip";
     context.Response.AddHeader("Content-Disposition", $"attachment; filename=\"{imeFajla}\"");
     context.Response.ContentLength64 = zipPodaci.Length;
-
     context.Response.OutputStream.Write(zipPodaci, 0, zipPodaci.Length);
     context.Response.OutputStream.Close();
 }
+
 void PosaljiTekst(HttpListenerContext context, string tekst, int statusKod = 200)
 {
     byte[] bytes = System.Text.Encoding.UTF8.GetBytes(tekst);
-
     context.Response.StatusCode = statusKod;
     context.Response.ContentType = "text/plain; charset=utf-8";
     context.Response.ContentLength64 = bytes.Length;
-
     context.Response.OutputStream.Write(bytes, 0, bytes.Length);
     context.Response.OutputStream.Close();
 }
